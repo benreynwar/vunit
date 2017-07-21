@@ -237,7 +237,7 @@ class VHDLPackage(object):
         """
         references = []
         for match in cls._package_instance_re.finditer(code):
-            references.append(cls(match.group("new_name"), [], [], []))
+            references.append(cls(match.group("new_name"), [], [], [], [], []))
         return references
 
     @classmethod
