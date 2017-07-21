@@ -16,7 +16,9 @@ import os
 import re
 import logging
 from vunit.ostools import Process, file_exists
-from vunit.simulator_interface import SimulatorInterface
+from vunit.simulator_interface import (SimulatorInterface,
+                                       ListOfStringOption,
+                                       StringOption)
 from vunit.exceptions import CompileError
 from vunit.vsim_simulator_mixin import (VsimSimulatorMixin,
                                         fix_path)
@@ -34,14 +36,15 @@ class RivieraProInterface(VsimSimulatorMixin, SimulatorInterface):
     package_users_depend_on_bodies = True
 
     compile_options = [
-        "rivierapro.vcom_flags",
-        "rivierapro.vlog_flags",
+        ListOfStringOption("rivierapro.vcom_flags"),
+        ListOfStringOption("rivierapro.vlog_flags"),
     ]
 
     sim_options = [
-        "rivierapro.vsim_flags",
-        "rivierapro.vsim_flags.gui",
-        "rivierapro.init_file.gui",
+        ListOfStringOption("rivierapro.vsim_flags"),
+        ListOfStringOption("rivierapro.vsim_flags.gui"),
+        ListOfStringOption("rivierapro.init_files.after_load"),
+        StringOption("rivierapro.init_file.gui"),
     ]
 
     @classmethod
@@ -250,10 +253,16 @@ proc vunit_load {{}} {{
     # Make the variable 'aldec' visible; otherwise, the Matlab interface
     # is broken because vsim does not find the library aldec_matlab_cosim.
     global aldec
+
     set vsim_failed [catch {{
         eval vsim {{{vsim_flags}}}
     }}]
+
     if {{${{vsim_failed}}}} {{
+        return 1
+    }}
+
+    if {{[_vunit_source_init_files_after_load]}} {{
         return 1
     }}
 

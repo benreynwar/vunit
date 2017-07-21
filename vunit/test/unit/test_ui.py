@@ -225,7 +225,7 @@ end architecture;
         files = ["file1.vhd",
                  "file2.vhd",
                  "file3.vhd",
-                 "file_foo.vhd"]
+                 "foo_file.vhd"]
 
         for file_name in files:
             self.create_file(file_name)
@@ -233,27 +233,27 @@ end architecture;
         ui = self._create_ui()
         lib = ui.add_library("lib")
         lib.add_source_files("file*.vhd")
-        lib.add_source_files("file_foo.vhd")
+        lib.add_source_files("foo_file.vhd")
         for file_name in files:
-            lib.get_source_file(file_name)
+            assert lib.get_source_file(file_name).name.endswith(file_name)
 
         ui = self._create_ui()
         lib = ui.add_library("lib")
-        lib.add_source_files(["file*.vhd", "file_foo.vhd"])
+        lib.add_source_files(["file*.vhd", "foo_file.vhd"])
         for file_name in files:
-            lib.get_source_file(file_name)
+            lib.get_source_file(file_name).name.endswith(file_name)
 
         ui = self._create_ui()
         lib = ui.add_library("lib")
-        lib.add_source_files(("file*.vhd", "file_foo.vhd"))
+        lib.add_source_files(("file*.vhd", "foo_file.vhd"))
         for file_name in files:
-            lib.get_source_file(file_name)
+            lib.get_source_file(file_name).name.endswith(file_name)
 
         ui = self._create_ui()
         lib = ui.add_library("lib")
-        lib.add_source_files(iter(["file*.vhd", "file_foo.vhd"]))
+        lib.add_source_files(iter(["file*.vhd", "foo_file.vhd"]))
         for file_name in files:
-            lib.get_source_file(file_name)
+            lib.get_source_file(file_name).name.endswith(file_name)
 
     def test_add_source_files_errors(self):
         ui = self._create_ui()
@@ -294,7 +294,7 @@ end architecture;
         self.assertEqual(compile_order[1].name, file_name)
 
         # With argument
-        compile_order = ui.get_compile_order(lib1.get_source_file(file_name))
+        compile_order = ui.get_compile_order([lib1.get_source_file(file_name)])
         self.assertEqual(len(compile_order), 1)
         self.assertEqual(compile_order[0].name, file_name)
 
@@ -672,10 +672,24 @@ endmodule
             ui = self._create_ui("--list")
             self._run_main(ui, 0)
 
+    def test_set_sim_option_before_adding_file(self):
+        """
+        From GitHub issue #250
+        """
+        ui = self._create_ui()
+        lib = ui.add_library("lib")
+        for method in (lib.set_sim_option, ui.set_sim_option):
+            method("disable_ieee_warnings", True, allow_empty=True)
+            self.assertRaises(ValueError, method, "disable_ieee_warnings", True)
+
+        for method in (lib.set_compile_option, lib.add_compile_option, ui.set_compile_option, ui.add_compile_option):
+            method("ghdl.elab_flags", [], allow_empty=True)
+            self.assertRaises(ValueError, method, "ghdl.elab_flags", [])
+
     def _create_ui(self, *args):
         """ Create an instance of the VUnit public interface class """
-        with mock.patch("vunit.ui.SimulatorFactory",
-                        new=MockSimulatorFactory):
+        with mock.patch("vunit.ui.SIMULATOR_FACTORY",
+                        new=MockSimulatorFactory()):
             ui = VUnit.from_argv(argv=["--output-path=%s" % self._output_path,
                                        "--clean"] + list(args),
                                  compile_builtins=False)
@@ -775,8 +789,7 @@ class MockSimulatorFactory(object):
     """
     simulator_name = "mocksim"
 
-    def __init__(self, args):
-        self._output_path = args.output_path
+    def __init__(self):
         self.mocksim = mock.Mock(spec=SimulatorInterface)
 
         def compile_side_effect(*args, **kwargs):
@@ -792,11 +805,7 @@ class MockSimulatorFactory(object):
     def package_users_depend_on_bodies():
         return False
 
-    @property
-    def simulator_output_path(self):
-        return join(self._output_path, self.simulator_name)
-
-    def create(self):
+    def create(self, args, simulator_output_path):  # pylint: disable=unused-argument
         return self.mocksim
 
 

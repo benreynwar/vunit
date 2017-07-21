@@ -11,7 +11,8 @@ Functionality to represent and operate on a HDL code project
 """
 
 
-from os.path import join, basename, dirname, splitext
+from os.path import join, basename, dirname, splitext, isdir, exists
+from copy import copy
 import traceback
 import logging
 from collections import OrderedDict
@@ -23,7 +24,7 @@ from vunit.cached import file_content_hash
 from vunit.parsing.verilog.parser import VerilogParser
 from vunit.parsing.encodings import HDL_FILE_ENCODING
 from vunit.exceptions import CompileError
-from vunit.simulator_factory import SimulatorFactory
+from vunit.simulator_factory import SIMULATOR_FACTORY
 from vunit.design_unit import DesignUnit, VHDLDesignUnit, Entity, Module
 import vunit.ostools as ostools
 LOGGER = logging.getLogger(__name__)
@@ -80,6 +81,14 @@ class Project(object):  # pylint: disable=too-many-instance-attributes
         is_external -- Library is assumed to a black-box
         """
         self._validate_library_name(logical_name)
+
+        if is_external:
+            if not exists(directory):
+                raise ValueError("External library %r does not exist" % directory)
+
+            if not isdir(directory):
+                raise ValueError("External library must be a directory. Got %r" % directory)
+
         if logical_name not in self._libraries:
             library = Library(logical_name, directory, vhdl_standard, is_external=is_external)
             LOGGER.debug('Adding library %s with path %s', logical_name, directory)
@@ -656,39 +665,23 @@ class SourceFile(object):
     def __repr__(self):
         return "SourceFile(%s, %s)" % (self.name, self.library.name)
 
-    # Deprecated aliases To be removed in a future release
-    _alias = {"ghdl_flags": "ghdl.flags",
-              "modelsim_vcom_flags": "modelsim.vcom_flags",
-              "modelsim_vlog_flags": "modelsim.vlog_flags"}
-
-    def _check_compile_option(self, name):
-        """
-        Check that the compile option is valid
-        """
-        if name in self._alias:
-            new_name = self._alias[name]
-            LOGGER.warning("Deprecated compile_option %r use %r instead", name, new_name)
-            name = new_name
-
-        known_options = SimulatorFactory.compile_options()
-        if name not in known_options:
-            LOGGER.error("Unknown compile_option %r, expected one of %r",
-                         name, known_options)
-            raise ValueError(name)
-
     def set_compile_option(self, name, value):
         """
         Set compile option
         """
-        self._check_compile_option(name)
+        SIMULATOR_FACTORY.check_compile_option(name, value)
         self._compile_options[name] = value
 
     def add_compile_option(self, name, value):
         """
         Add compile option
         """
-        self._check_compile_option(name)
-        self._compile_options[name] = self._compile_options.get(name, []) + value
+        SIMULATOR_FACTORY.check_compile_option(name, value)
+
+        if name not in self._compile_options:
+            self._compile_options[name] = value
+        else:
+            self._compile_options[name] += value
 
     @property
     def compile_options(self):
@@ -698,13 +691,12 @@ class SourceFile(object):
         """
         Return a copy of the compile option list
         """
-        self._check_compile_option(name)
+        SIMULATOR_FACTORY.check_compile_option_name(name)
 
         if name not in self._compile_options:
             self._compile_options[name] = []
 
-        # Copy
-        return [option for option in self._compile_options[name]]
+        return copy(self._compile_options[name])
 
     def _compile_options_hash(self):
         """

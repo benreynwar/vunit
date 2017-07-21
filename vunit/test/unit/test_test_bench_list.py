@@ -15,7 +15,7 @@ import unittest
 from os.path import join, dirname, exists
 from shutil import rmtree
 
-from vunit.test_bench_list import tb_filter
+from vunit.test_bench_list import TestBenchList, tb_filter
 from vunit.test.unit.test_test_bench import Entity, Module
 from vunit.ostools import renew_path
 from vunit.test.mock_2or3 import mock
@@ -35,6 +35,10 @@ class TestTestBenchList(unittest.TestCase):
         if exists(self.output_path):
             rmtree(self.output_path)
 
+    def test_get_test_benches_in_empty_library(self):
+        tb_list = TestBenchList()
+        self.assertEqual(tb_list.get_test_benches_in_library("lib"), [])
+
     def test_tb_filter_requires_runner_cfg(self):
         design_unit = Entity('tb_entity')
         design_unit.generic_names = ["runner_cfg"]
@@ -52,6 +56,15 @@ class TestTestBenchList(unittest.TestCase):
         design_unit.generic_names = []
         self.assertFalse(tb_filter(design_unit))
 
+    def test_tb_filter_match_prefix_and_suffix_only(self):
+        """
+        Issue #263
+        """
+        with mock.patch("vunit.test_bench_list.LOGGER", autospec=True) as logger:
+            design_unit = Entity("mul_tbl_scale")
+            self.assertFalse(tb_filter(design_unit))
+            self.assertFalse(logger.warning.called)
+
     def test_tb_filter_warning_on_missing_runner_cfg_when_matching_tb_pattern(self):
         design_unit = Module('tb_module_not_ok')
         design_unit.generic_names = []
@@ -64,7 +77,7 @@ class TestTestBenchList(unittest.TestCase):
                           'in file %s',
                           'Module',
                           'tb_module_not_ok',
-                          '(tb_.*)|(.*_tb)',
+                          '^(tb_.*)|(.*_tb)$',
                           'parameter',
                           design_unit.file_name)])
 
@@ -81,7 +94,7 @@ class TestTestBenchList(unittest.TestCase):
                           'entity_ok_but_warning',
                           'generic',
                           'entity',
-                          '(tb_.*)|(.*_tb)',
+                          '^(tb_.*)|(.*_tb)$',
                           design_unit.file_name)])
 
 

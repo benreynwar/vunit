@@ -276,7 +276,7 @@ use {use_clause}.PKG.all;
         package, _, module = self.create_module_package_and_body(add_body=False)
         self.assert_compiles(package, before=module)
 
-    def test_package_instantiation_dependencies(self):
+    def test_package_instantiation_dependencies_on_generic_package(self):
         self.project.add_library("pkg_lib", "pkg_lib_path")
         pkg = self.add_source_file("pkg_lib", "pkg.vhd", """
 package pkg is
@@ -297,6 +297,23 @@ end architecture;
 """)
 
         self.assert_compiles(pkg, before=ent)
+
+    def test_package_instantiation_dependencies_on_instantiated_package(self):
+        self.project.add_library("lib", "lib_path")
+        generic_pkg = self.add_source_file("lib", "generic_pkg.vhd", """
+package generic_pkg is
+  generic (foo : boolean);
+end package;
+""")
+        instance_pkg = self.add_source_file("lib", "instance_pkg.vhd", """
+package instance_pkg is new work.generic_pkg
+  generic map (foo => false);
+""")
+        user = self.add_source_file("lib", "user.vhd", """
+use work.instance_pkg;
+""")
+        self.assert_compiles(generic_pkg, before=instance_pkg)
+        self.assert_compiles(instance_pkg, before=user)
 
     def test_finds_context_dependencies(self):
         self.project.add_library("lib", "lib_path")
@@ -632,13 +649,22 @@ endpackage
         self.assert_should_recompile([source_file])
 
     def test_add_compile_option(self):
-        file1, _, _ = self.create_dummy_three_file_project()
+        self.project.add_library("lib", "lib_path")
+        file1 = self.add_source_file("lib", "file.vhd", "")
         file1.add_compile_option("ghdl.flags", ["--foo"])
         self.assertEqual(file1.get_compile_option("ghdl.flags"), ["--foo"])
         file1.add_compile_option("ghdl.flags", ["--bar"])
         self.assertEqual(file1.get_compile_option("ghdl.flags"), ["--foo", "--bar"])
         file1.set_compile_option("ghdl.flags", ["--xyz"])
         self.assertEqual(file1.get_compile_option("ghdl.flags"), ["--xyz"])
+
+    def test_compile_option_validation(self):
+        self.project.add_library("lib", "lib_path")
+        source_file = self.add_source_file("lib", "file.vhd", "")
+        self.assertRaises(ValueError, source_file.set_compile_option, "foo", None)
+        self.assertRaises(ValueError, source_file.set_compile_option, "ghdl.flags", None)
+        self.assertRaises(ValueError, source_file.add_compile_option, "ghdl.flags", None)
+        self.assertRaises(ValueError, source_file.get_compile_option, "foo")
 
     def test_should_recompile_files_affected_by_change_with_later_timestamp(self):
         file1, file2, file3 = self.create_dummy_three_file_project()
@@ -1173,6 +1199,27 @@ use builtin_lib.all;
         self.project.get_files_in_compile_order()
         warning_calls = mock_logger.warning.call_args_list
         self.assertEqual(len(warning_calls), 0)
+
+    def test_add_external_library(self):
+        os.makedirs("lib_path")
+        self.project.add_library("lib", "lib_path", is_external=True)
+
+    def test_add_external_library_must_exist(self):
+        try:
+            self.project.add_library("lib2", "lib_path2", is_external=True)
+        except ValueError as err:
+            self.assertEqual(str(err), "External library 'lib_path2' does not exist")
+        else:
+            assert False, "ValueError not raised"
+
+    def test_add_external_library_must_be_a_directory(self):
+        write_file("lib_path3", "")
+        try:
+            self.project.add_library("lib3", "lib_path3", is_external=True)
+        except ValueError as err:
+            self.assertEqual(str(err), "External library must be a directory. Got 'lib_path3'")
+        else:
+            assert False, "ValueError not raised"
 
     def add_source_file(self, library_name, file_name, contents, defines=None):
         """

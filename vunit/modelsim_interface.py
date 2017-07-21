@@ -24,7 +24,9 @@ except ImportError:
     from ConfigParser import RawConfigParser  # pylint: disable=import-error
 
 from vunit.ostools import Process, file_exists
-from vunit.simulator_interface import SimulatorInterface
+from vunit.simulator_interface import (SimulatorInterface,
+                                       ListOfStringOption,
+                                       StringOption)
 from vunit.exceptions import CompileError
 from vunit.vsim_simulator_mixin import (VsimSimulatorMixin,
                                         fix_path)
@@ -44,14 +46,15 @@ class ModelSimInterface(VsimSimulatorMixin, SimulatorInterface):  # pylint: disa
     package_users_depend_on_bodies = False
 
     compile_options = [
-        "modelsim.vcom_flags",
-        "modelsim.vlog_flags",
+        ListOfStringOption("modelsim.vcom_flags"),
+        ListOfStringOption("modelsim.vlog_flags"),
     ]
 
     sim_options = [
-        "modelsim.vsim_flags",
-        "modelsim.vsim_flags.gui",
-        "modelsim.init_file.gui",
+        ListOfStringOption("modelsim.vsim_flags"),
+        ListOfStringOption("modelsim.vsim_flags.gui"),
+        ListOfStringOption("modelsim.init_files.after_load"),
+        StringOption("modelsim.init_file.gui"),
     ]
 
     @classmethod
@@ -265,6 +268,10 @@ proc vunit_load {{{{vsim_extra_args ""}}}} {{
        echo Command 'vsim ${{vsim_extra_args}} {vsim_flags}' failed
        echo Bad flag from vsim_extra_args?
        return 1
+    }}
+
+    if {{[_vunit_source_init_files_after_load]}} {{
+        return 1
     }}
 
     set no_finished_signal [catch {{examine -internal {{/vunit_finished}}}}]

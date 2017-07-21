@@ -48,7 +48,7 @@ class TestBenchList(object):
         return self._libraries[library_name][name]
 
     def get_test_benches_in_library(self, library_name):
-        return self._libraries[library_name].values()
+        return list(self._libraries.get(library_name, {}).values())
 
     def get_test_benches(self):
         """
@@ -78,7 +78,7 @@ class TestBenchList(object):
                            tb_filter.__doc__)
 
 
-TB_PATTERN = "(tb_.*)|(.*_tb)"
+TB_PATTERN = "^(tb_.*)|(.*_tb)$"
 TB_RE = re.compile(TB_PATTERN,
                    re.IGNORECASE)
 

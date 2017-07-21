@@ -113,9 +113,17 @@ The following simulation options are known.
    mode where it takes precedence over ``modelsim.vsim_flags``.
    Must be a list of strings.
 
+``modelsim.init_files.after_load``
+   A list of user defined DO/TCL-files that is sourced after the design has been loaded.
+   During script evaluation the ``vunit_tb_path`` variable is defined
+   as the path of the folder containing the test bench.
+   Must be a list of strings.
+
 ``modelsim.init_file.gui``
    A user defined TCL-file that is sourced after the design has been loaded in the GUI.
    For example this can be used to configure the waveform viewer.
+   During script evaluation the ``vunit_tb_path`` variable is defined
+   as the path of the folder containing the test bench.
    Must be a string.
 
 ``rivierapro.vsim_flags``
@@ -127,9 +135,17 @@ The following simulation options are known.
    mode where it takes precedence over ``rivierapro.vsim_flags``.
    Must be a list of strings.
 
+``rivierapro.init_files.after_load``
+   A list of user defined DO/TCL-files that is sourced after the design has been loaded.
+   During script evaluation the ``vunit_tb_path`` variable is defined
+   as the path of the folder containing the test bench.
+   Must be a list of strings.
+
 ``rivierapro.init_file.gui``
    A user defined TCL-file that is sourced after the design has been loaded in the GUI.
    For example this can be used to configure the waveform viewer.
+   During script evaluation the ``vunit_tb_path`` variable is defined
+   as the path of the folder containing the test bench.
    Must be a string.
 
 ``activehdl.vsim_flags``
@@ -201,7 +217,8 @@ from fnmatch import fnmatch
 from vunit.database import PickledDataBase, DataBase
 import vunit.ostools as ostools
 from vunit.vunit_cli import VUnitCLI
-from vunit.simulator_factory import SimulatorFactory
+from vunit.simulator_factory import SIMULATOR_FACTORY
+from vunit.simulator_interface import is_string_not_iterable
 from vunit.color_printer import (COLOR_PRINTER,
                                  NO_COLOR_PRINTER)
 from vunit.project import (Project,
@@ -267,85 +284,38 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
         :param compile_builtins: Do not compile builtins. Used for VUnit internal testing.
         :returns: A :class:`.VUnit` object instance
         """
-        def test_filter(name):
-            return any(fnmatch(name, pattern) for pattern in args.test_patterns)
 
-        return cls(output_path=args.output_path,
-                   clean=args.clean,
-                   vhdl_standard=select_vhdl_standard(),
-                   use_debug_codecs=args.use_debug_codecs,
-                   no_color=args.no_color,
-                   verbose=args.verbose,
-                   xunit_xml=args.xunit_xml,
-                   log_level=args.log_level,
-                   test_filter=test_filter,
-                   list_only=args.list,
-                   list_files_only=args.files,
-                   compile_only=args.compile,
-                   keep_compiling=args.keep_compiling,
-                   elaborate_only=args.elaborate,
-                   compile_builtins=compile_builtins,
-                   simulator_factory=SimulatorFactory(args),
-                   num_threads=args.num_threads,
-                   exit_0=args.exit_0,
-                   dont_catch_exceptions=args.dont_catch_exceptions)
+        return cls(args, compile_builtins=compile_builtins)
 
-    def __init__(self,  # pylint: disable=too-many-locals, too-many-arguments
-                 output_path,
-                 simulator_factory,
-                 clean=False,
-                 use_debug_codecs=False,
-                 no_color=False,
-                 verbose=False,
-                 xunit_xml=None,
-                 log_level="warning",
-                 test_filter=None,
-                 list_only=False,
-                 list_files_only=False,
-                 compile_only=False,
-                 keep_compiling=False,
-                 elaborate_only=False,
-                 vhdl_standard='2008',
-                 compile_builtins=True,
-                 num_threads=1,
-                 exit_0=False,
-                 dont_catch_exceptions=False):
+    def __init__(self, args, compile_builtins=True):
+        self._args = args
+        self._configure_logging(args.log_level)
+        self._output_path = abspath(args.output_path)
 
-        self._configure_logging(log_level)
-        self._elaborate_only = elaborate_only
-        self._output_path = abspath(output_path)
-
-        if no_color:
+        if args.no_color:
             self._printer = NO_COLOR_PRINTER
         else:
             self._printer = COLOR_PRINTER
 
-        self._verbose = verbose
-        self._xunit_xml = xunit_xml
+        def test_filter(name):
+            return any(fnmatch(name, pattern) for pattern in args.test_patterns)
 
-        self._test_filter = test_filter if test_filter is not None else lambda name: True
-        self._list_only = list_only
-        self._list_files_only = list_files_only
-        self._compile_only = compile_only
-        self._keep_compiling = keep_compiling
-        self._vhdl_standard = vhdl_standard
+        self._test_filter = test_filter
+        self._vhdl_standard = select_vhdl_standard()
 
         self._external_preprocessors = []
         self._location_preprocessor = None
         self._check_preprocessor = None
-        self._use_debug_codecs = use_debug_codecs
+        self._use_debug_codecs = args.use_debug_codecs
 
-        self._simulator_factory = simulator_factory
-        self._create_output_path(clean)
+        self._simulator_factory = SIMULATOR_FACTORY
+        self._simulator_output_path = join(self._output_path, SIMULATOR_FACTORY.simulator_name)
+        self._create_output_path(args.clean)
 
         database = self._create_database()
         self._project = Project(
             database=database,
             depend_on_package_body=self._simulator_factory.package_users_depend_on_bodies())
-
-        self._num_threads = num_threads
-        self._exit_0 = exit_0
-        self._dont_catch_exceptions = dont_catch_exceptions
 
         self._test_bench_list = TestBenchList(database=database)
 
@@ -387,12 +357,12 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
         level = getattr(logging, log_level.upper())
         logging.basicConfig(filename=None, format='%(levelname)7s - %(message)s', level=level)
 
-    def add_external_library(self, library_name, path=None, vhdl_standard=None):
+    def add_external_library(self, library_name, path, vhdl_standard=None):
         """
         Add an externally compiled library as a black-box
 
         :param library_name: The name of the external library
-        :param path: The path to the external library
+        :param path: The path to the external library directory
         :param vhdl_standard: The VHDL standard used to compile files into this library,
                               if None the VUNIT_VHDL_STANDARD environment variable is used
         :returns: The created :class:`.Library` object
@@ -406,9 +376,6 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
         """
         if vhdl_standard is None:
             vhdl_standard = self._vhdl_standard
-
-        if path is None:
-            path = join(self._simulator_factory.simulator_output_path, "libraries", library_name)
 
         self._project.add_library(library_name, abspath(path), vhdl_standard, is_external=True)
         return self.library(library_name)
@@ -431,7 +398,7 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
         """
         if vhdl_standard is None:
             vhdl_standard = self._vhdl_standard
-        path = join(self._simulator_factory.simulator_output_path, "libraries", library_name)
+        path = join(self._simulator_output_path, "libraries", library_name)
         self._project.add_library(library_name, abspath(path), vhdl_standard)
         return self.library(library_name)
 
@@ -446,12 +413,13 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
             raise KeyError(library_name)
         return Library(library_name, self, self._project, self._test_bench_list)
 
-    def set_generic(self, name, value):
+    def set_generic(self, name, value, allow_empty=False):
         """
         Set a value of generic in all |configurations|
 
         :param name: The name of the generic
         :param value: The value of the generic
+        :param allow_empty: To disable an error when no test benches were found
 
         :example:
 
@@ -462,15 +430,17 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
         .. note::
            Only affects test benches added *before* the generic is set.
         """
-        for test_bench in self._test_bench_list.get_test_benches():
+        test_benches = self._test_bench_list.get_test_benches()
+        for test_bench in check_not_empty(test_benches, allow_empty, "No test benches found"):
             test_bench.set_generic(name.lower(), value)
 
-    def set_parameter(self, name, value):
+    def set_parameter(self, name, value, allow_empty=False):
         """
         Set value of parameter in all |configurations|
 
         :param name: The name of the parameter
         :param value: The value of the parameter
+        :param allow_empty: To disable an error when no test benches were found
 
         :example:
 
@@ -481,15 +451,17 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
         .. note::
            Only affects test benches added *before* the parameter is set.
         """
-        for test_bench in self._test_bench_list.get_test_benches():
+        test_benches = self._test_bench_list.get_test_benches()
+        for test_bench in check_not_empty(test_benches, allow_empty, "No test benches found"):
             test_bench.set_generic(name, value)
 
-    def set_sim_option(self, name, value):
+    def set_sim_option(self, name, value, allow_empty=False):
         """
         Set simulation option in all |configurations|
 
         :param name: |simulation_options|
         :param value: The value of the simulation option
+        :param allow_empty: To disable an error when no test benches were found
 
         :example:
 
@@ -500,15 +472,17 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
         .. note::
            Only affects test benches added *before* the option is set.
         """
-        for test_bench in self._test_bench_list.get_test_benches():
+        test_benches = self._test_bench_list.get_test_benches()
+        for test_bench in check_not_empty(test_benches, allow_empty, "No test benches found"):
             test_bench.set_sim_option(name, value)
 
-    def set_compile_option(self, name, value):
+    def set_compile_option(self, name, value, allow_empty=False):
         """
         Set compile option of all files
 
         :param name: |compile_option|
         :param value: The value of the compile option
+        :param allow_empty: To disable an error when no source files were found
 
         :example:
 
@@ -520,20 +494,23 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
         .. note::
            Only affects files added *before* the option is set.
         """
-        for source_file in self._project.get_source_files_in_order():
+        source_files = self._project.get_source_files_in_order()
+        for source_file in check_not_empty(source_files, allow_empty, "No source files found"):
             source_file.set_compile_option(name, value)
 
-    def add_compile_option(self, name, value):
+    def add_compile_option(self, name, value, allow_empty=False):
         """
         Add compile option to all files
 
         :param name: |compile_option|
         :param value: The value of the compile option
+        :param allow_empty: To disable an error when no source files were found
 
         .. note::
            Only affects files added *before* the option is set.
         """
-        for source_file in self._project.get_source_files_in_order():
+        source_files = self._project.get_source_files_in_order()
+        for source_file in check_not_empty(source_files, allow_empty, "No source files found"):
             source_file.add_compile_option(name, value)
 
     def get_source_file(self, file_name, library_name=None):
@@ -578,9 +555,9 @@ class VUnit(object):  # pylint: disable=too-many-instance-attributes, too-many-p
 
             results.append(SourceFile(source_file, self._project, self))
 
-        if (not allow_empty) and (not results):
-            raise ValueError(("Pattern %r did not match any file. "
-                              "Use allow_empty=True to avoid exception,") % pattern)
+        check_not_empty(results, allow_empty,
+                        ("Pattern %r did not match any file" % pattern) +
+                        (("within library %s" % library_name) if library_name is not None else ""))
 
         return SourceFileList(results)
 
@@ -727,12 +704,12 @@ avoid location preprocessing of other functions sharing name with a VUnit log or
         except SystemExit:
             sys.exit(1)
         except:  # pylint: disable=bare-except
-            if self._dont_catch_exceptions:
+            if self._args.dont_catch_exceptions:
                 raise
             traceback.print_exc()
             sys.exit(1)
 
-        if (not all_ok) and (not self._exit_0):
+        if (not all_ok) and (not self._args.exit_0):
             sys.exit(1)
 
         sys.exit(0)
@@ -742,7 +719,7 @@ avoid location preprocessing of other functions sharing name with a VUnit log or
         Create the test cases
         """
         self._test_bench_list.warn_when_empty()
-        test_list = self._test_bench_list.create_tests(simulator_if, self._elaborate_only)
+        test_list = self._test_bench_list.create_tests(simulator_if, self._args.elaborate)
         test_list.keep_matches(self._test_filter)
         return test_list
 
@@ -751,22 +728,25 @@ avoid location preprocessing of other functions sharing name with a VUnit log or
         Base vunit main function without performing exit
         """
 
-        if self._list_only:
+        if self._args.list:
             return self._main_list_only()
 
-        elif self._list_files_only:
+        elif self._args.files:
             return self._main_list_files_only()
 
-        elif self._compile_only:
+        elif self._args.compile:
             return self._main_compile_only()
 
         return self._main_run()
+
+    def _create_simulator_if(self):
+        return self._simulator_factory.create(self._args, self._simulator_output_path)
 
     def _main_run(self):
         """
         Main with running tests
         """
-        simulator_if = self._simulator_factory.create()
+        simulator_if = self._create_simulator_if()
         test_list = self._create_tests(simulator_if)
         self._compile(simulator_if)
 
@@ -774,7 +754,7 @@ avoid location preprocessing of other functions sharing name with a VUnit log or
         report = TestReport(printer=self._printer)
         try:
             self._run_test(test_list, report)
-            simulator_if.post_process(self._simulator_factory.simulator_output_path)
+            simulator_if.post_process(self._simulator_output_path)
         except KeyboardInterrupt:
             print()
             LOGGER.debug("_main: Caught Ctrl-C shutting down")
@@ -812,7 +792,7 @@ avoid location preprocessing of other functions sharing name with a VUnit log or
         """
         Main function when only compiling
         """
-        simulator_if = self._simulator_factory.create()
+        simulator_if = self._create_simulator_if()
         self._compile(simulator_if)
         return True
 
@@ -848,7 +828,7 @@ avoid location preprocessing of other functions sharing name with a VUnit log or
         Compile entire project
         """
         simulator_if.compile_project(self._project,
-                                     continue_on_error=self._keep_compiling)
+                                     continue_on_error=self._args.keep_compiling)
 
     def _run_test(self, test_cases, report):
         """
@@ -856,9 +836,9 @@ avoid location preprocessing of other functions sharing name with a VUnit log or
         """
         runner = TestRunner(report,
                             join(self._output_path, "test_output"),
-                            verbose=self._verbose,
-                            num_threads=self._num_threads,
-                            dont_catch_exceptions=self._dont_catch_exceptions)
+                            verbose=self._args.verbose,
+                            num_threads=self._args.num_threads,
+                            dont_catch_exceptions=self._args.dont_catch_exceptions)
         runner.run(test_cases)
 
     def _post_process(self, report):
@@ -867,9 +847,9 @@ avoid location preprocessing of other functions sharing name with a VUnit log or
         """
         report.print_str()
 
-        if self._xunit_xml is not None:
+        if self._args.xunit_xml is not None:
             xml = report.to_junit_xml_str()
-            ostools.write_file(self._xunit_xml, xml)
+            ostools.write_file(self._args.xunit_xml, xml)
 
     def add_builtins(self, library_name="vunit_lib", mock_lang=False, mock_log=False):
         """
@@ -986,12 +966,13 @@ class Library(object):
         """
         return self._library_name
 
-    def set_generic(self, name, value):
+    def set_generic(self, name, value, allow_empty=False):
         """
         Set a value of generic within all |configurations| of test benches and tests this library
 
         :param name: The name of the generic
         :param value: The value of the generic
+        :param allow_empty: To disable an error when no test benches were found
 
         :example:
 
@@ -1002,15 +983,16 @@ class Library(object):
         .. note::
            Only affects test benches added *before* the generic is set.
         """
-        for test_bench in self.get_test_benches():
+        for test_bench in self.get_test_benches(allow_empty=allow_empty):
             test_bench.set_generic(name.lower(), value)
 
-    def set_parameter(self, name, value):
+    def set_parameter(self, name, value, allow_empty=False):
         """
         Set a value of parameter within all |configurations| of test benches and tests this library
 
         :param name: The name of the parameter
         :param value: The value of the parameter
+        :param allow_empty: To disable an error when no test benches were found
 
         :example:
 
@@ -1021,15 +1003,16 @@ class Library(object):
         .. note::
            Only affects test benches added *before* the parameter is set.
         """
-        for test_bench in self.get_test_benches():
+        for test_bench in self.get_test_benches(allow_empty=allow_empty):
             test_bench.set_generic(name, value)
 
-    def set_sim_option(self, name, value):
+    def set_sim_option(self, name, value, allow_empty=False):
         """
         Set simlation option within all |configurations| of test benches and tests this library
 
         :param name: |simulation_options|
         :param value: The value of the simulation option
+        :param allow_empty: To disable an error when no test benches were found
 
         :example:
 
@@ -1040,15 +1023,16 @@ class Library(object):
         .. note::
            Only affects test benches added *before* the option is set.
         """
-        for test_bench in self.get_test_benches():
+        for test_bench in self.get_test_benches(allow_empty=allow_empty):
             test_bench.set_sim_option(name, value)
 
-    def set_compile_option(self, name, value):
+    def set_compile_option(self, name, value, allow_empty=False):
         """
         Set compile option for all files within the library
 
         :param name: |compile_option|
         :param value: The value of the compile option
+        :param allow_empty: To disable an error when no source files were found
 
         :example:
 
@@ -1060,29 +1044,41 @@ class Library(object):
         .. note::
            Only affects files added *before* the option is set.
         """
-        for source_file in self._project.get_source_files_in_order():
-            if source_file.library.name == self._library_name:
-                source_file.set_compile_option(name, value)
+        for source_file in self.get_source_files(allow_empty=allow_empty):
+            source_file.set_compile_option(name, value)
 
-    def add_compile_option(self, name, value):
+    def add_compile_option(self, name, value, allow_empty=False):
         """
         Add compile option to all files within the library
 
         :param name: |compile_option|
         :param value: The value of the compile option
-
+        :param allow_empty: To disable an error when no source files were found
 
         .. note::
            Only affects files added *before* the option is set.
         """
-        for source_file in self._project.get_source_files_in_order():
-            if source_file.library.name == self._library_name:
-                source_file.add_compile_option(name, value)
+        for source_file in self.get_source_files(allow_empty=allow_empty):
+            source_file.add_compile_option(name, value)
 
     def get_source_file(self, file_name):
-        return self._parent.get_source_files(file_name, self._library_name)
+        """
+        Get a source file within this library
+
+        :param file_name: The name of the file as a relative or absolute path
+
+        :returns: A :class:`.SourceFile` object
+        """
+        return self._parent.get_source_file(file_name, self._library_name)
 
     def get_source_files(self, pattern="*", allow_empty=False):
+        """
+        Get a list of source files within this libary
+
+        :param pattern: A wildcard pattern matching either an absolute or relative path
+        :param allow_empty: To disable an error if no files matched the pattern
+        :returns: A :class:`.SourceFileList` object
+        """
         return self._parent.get_source_files(pattern, self._library_name, allow_empty)
 
     def add_source_files(self,   # pylint: disable=too-many-arguments
@@ -1106,7 +1102,7 @@ class Library(object):
            library.add_source_files("*.vhd")
 
         """
-        if _is_string_not_iterable(pattern):
+        if is_string_not_iterable(pattern):
             patterns = [pattern]
         else:
             patterns = pattern
@@ -1114,10 +1110,7 @@ class Library(object):
         file_names = []
         for pattern_instance in patterns:
             new_file_names = glob(pattern_instance)
-
-            if (not allow_empty) and (not new_file_names):
-                raise ValueError(("Pattern %r did not match any file. "
-                                  "Use allow_empty=True to avoid exception,") % pattern_instance)
+            check_not_empty(new_file_names, allow_empty, "Pattern %r did not match any file" % pattern_instance)
             file_names += new_file_names
 
         return SourceFileList(source_files=[
@@ -1220,11 +1213,12 @@ class Library(object):
 
         return TestBench(self._test_bench_list.get_test_bench(self._library_name, name), self)
 
-    def get_test_benches(self, pattern="*"):
+    def get_test_benches(self, pattern="*", allow_empty=False):
         """
         Get a list of test benches
 
         :param pattern: A wildcard pattern matching the test_bench name
+        :param allow_empty: To disable an error when no test benches were found
         :returns: A list of :class:`.TestBench` objects
         """
         results = []
@@ -1233,7 +1227,9 @@ class Library(object):
                 continue
 
             results.append(TestBench(test_bench, self))
-        return results
+
+        return check_not_empty(results, allow_empty,
+                               "No test benches found within library %s" % self._library_name)
 
 
 class TestBench(object):
@@ -1754,11 +1750,12 @@ def lower_generics(generics):
     return dict((name.lower(), value) for name, value in generics.items())
 
 
-def _is_string_not_iterable(value):
+def check_not_empty(lst, allow_empty, error_msg):
     """
-    Returns True if value is a string and not another iterable
+    Raise ValueError if the list is empty unless allow_empty is True
+    Returns the list
     """
-    if sys.version_info.major == 3:
-        return isinstance(value, str)
-
-    return isinstance(value, (str, unicode))  # pylint: disable=undefined-variable
+    if (not allow_empty) and (not lst):
+        raise ValueError(error_msg +
+                         ". Use allow_empty=True to avoid exception.")
+    return lst
