@@ -858,7 +858,7 @@ class VHDLConstant(object):
         \s+
         (?P<id>[a-zA-Z][\w]*)
         \s*:\s*
-        (?P<type_indication>.*?)\s*
+        (?P<type_indication>[a-zA-Z][\w]*?)\s*
         :=\s*
         (?P<text>.*?)\s*;""", re.MULTILINE | re.IGNORECASE | re.VERBOSE | re.DOTALL)
 
