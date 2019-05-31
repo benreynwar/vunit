@@ -13,7 +13,7 @@ from vunit.modelsim_interface import ModelSimInterface
 from vunit.activehdl_interface import ActiveHDLInterface
 from vunit.rivierapro_interface import RivieraProInterface
 from vunit.ghdl_interface import GHDLInterface
-from vunit.vcsmx_interface import VCSMxInterface
+from vunit.vcsmx_interface import VCSMXInterface
 from vunit.incisive_interface import IncisiveInterface
 from vunit.simulator_interface import (BooleanOption,
                                        ListOfStringOption,
